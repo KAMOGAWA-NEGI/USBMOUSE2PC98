@@ -1,5 +1,5 @@
 /*
-  USBMOUSE2PC98.ino
+  PC98_USB_Mouse_RP2040.ino
 
   USB HIDマウスをPC-9801用バスマウス信号へ変換するRP2040向けファームウェア。
 
@@ -26,10 +26,10 @@
 #include "hardware/sync.h"
 
 #if __has_include(<Adafruit_NeoPixel.h>)
-#include <Adafruit_NeoPixel.h>
-#define HAVE_NEOPIXEL 1
+  #include <Adafruit_NeoPixel.h>
+  #define HAVE_NEOPIXEL 1
 #else
-#define HAVE_NEOPIXEL 0
+  #define HAVE_NEOPIXEL 0
 #endif
 
 // -----------------------------------------------------------------------------
@@ -49,22 +49,24 @@
 //
 // GPIO27/28/29は未使用。配線都合で使う場合は下の定数だけ変更する。
 
-static constexpr uint8_t PIN_LB = 0;
-static constexpr uint8_t PIN_RB = 1;
-static constexpr uint8_t PIN_YB = 8;
-static constexpr uint8_t PIN_XA = 14;
-static constexpr uint8_t PIN_XB = 15;
-static constexpr uint8_t PIN_YA = 26;
-static constexpr uint8_t PIN_WS2812 = 16;  // RP2040 Zero上のRGB LED。不要なら未使用でよい。
+static constexpr uint8_t PIN_LB     = 0;
+static constexpr uint8_t PIN_RB     = 1;
+static constexpr uint8_t PIN_YB     = 8;
+static constexpr uint8_t PIN_XA     = 14;
+static constexpr uint8_t PIN_XB     = 15;
+static constexpr uint8_t PIN_YA     = 26;
+static constexpr uint8_t PIN_WS2812 = 16;   // RP2040 Zero上のRGB LED。不要なら未使用でよい。
 
 // -----------------------------------------------------------------------------
 // HCT07出力設定
 // -----------------------------------------------------------------------------
 
 // HCT07は非反転なので通常false。
+// もし実測で全信号が反転している場合だけtrueにする。
 static constexpr bool HCT07_OUTPUT_INVERT = false;
 
 // 2相信号の初期位相。
+// main_mouse.c の初期LATB相当は0、つまりA/BともLOW。
 static constexpr uint8_t PC98_QUAD_INITIAL_PHASE = 0;
 
 // -----------------------------------------------------------------------------
@@ -97,7 +99,7 @@ static constexpr int32_t MOTION_SCALE_DEN = 4;
 static constexpr int32_t ACCUM_LIMIT = 768;
 
 // main_mouse.c と同じ時間配分。
-static constexpr uint32_t REPORT_TIME_SINGLE_AXIS_US = 10000;
+static constexpr uint32_t REPORT_TIME_SINGLE_AXIS_US   = 10000;
 static constexpr uint32_t REPORT_TIME_DIAGONAL_AXIS_US = 5000;
 
 static constexpr int32_t MOTION_BATCH_LIMIT = 127;
@@ -105,7 +107,7 @@ static constexpr uint32_t MIN_STEP_INTERVAL_US = 40;
 static constexpr uint32_t MAX_STEP_INTERVAL_US = 10000;
 
 // USB HIDレポートのボタンビット。
-static constexpr uint8_t USB_BTN_LEFT = 0x01;
+static constexpr uint8_t USB_BTN_LEFT  = 0x01;
 static constexpr uint8_t USB_BTN_RIGHT = 0x02;
 
 // -----------------------------------------------------------------------------
@@ -205,9 +207,9 @@ static void updateStatusLED() {
   lastStepCount = currentSteps;
 
   if (movedRecently) {
-    setPixel(0, 0, 24);  // 青: PC-98側へパルス出力中。
+    setPixel(0, 0, 24);      // 青: PC-98側へパルス出力中。
   } else if (g_mouseMountedCount != 0) {
-    setPixel(0, 18, 0);  // 緑: USBマウス認識済み。
+    setPixel(0, 18, 0);      // 緑: USBマウス認識済み。
   } else {
     if ((nowMs / 400) & 1) setPixel(16, 0, 0);
     else setPixel(0, 0, 0);  // 赤点滅: USBマウス未接続。
@@ -238,8 +240,8 @@ static void applyQuadraturePhase(uint8_t pinA, uint8_t pinB, uint8_t phase) {
       writePc98Level(pinB, false);  // B=LOW
       break;
     case 2:
-      writePc98Level(pinA, true);  // A=HIGH
-      writePc98Level(pinB, true);  // B=HIGH
+      writePc98Level(pinA, true);   // A=HIGH
+      writePc98Level(pinB, true);   // B=HIGH
       break;
     case 3:
       writePc98Level(pinA, false);  // A=LOW
@@ -281,14 +283,14 @@ static void setupPc98Outputs() {
 
 static void advanceX(int dir) {
   if (dir > 0) g_phaseX = (g_phaseX + 1) & 0x03;
-  else g_phaseX = (g_phaseX + 3) & 0x03;
+  else         g_phaseX = (g_phaseX + 3) & 0x03;
   applyQuadraturePhase(PIN_XA, PIN_XB, g_phaseX);
   g_stepCount++;
 }
 
 static void advanceY(int dir) {
   if (dir > 0) g_phaseY = (g_phaseY + 1) & 0x03;
-  else g_phaseY = (g_phaseY + 3) & 0x03;
+  else         g_phaseY = (g_phaseY + 3) & 0x03;
   applyQuadraturePhase(PIN_YA, PIN_YB, g_phaseY);
   g_stepCount++;
 }
@@ -353,10 +355,22 @@ static void servicePc98MouseOutput() {
   setButtons(g_buttons);
 
   uint32_t now = micros();
-  if (!timePassed(now, g_nextStepUs)) return;
 
+  // 旧版では最初に timePassed(now, g_nextStepUs) を見ていた。
+  // そのため、長時間待機して g_nextStepUs が古くなりすぎると、
+  // micros() の32bit差分判定の範囲を超えて「まだ時間ではない」と誤判定し、
+  // 新しい方向入力があっても2相信号の出力が再開しないことがあった。
+  // ボタンはこの時間判定より前に処理されるため、その影響を受けなかった。
+  //
+  // 対策として、待機中(axis=0)は時間判定を使わず、まず新しい移動バッチを取りに行く。
+  // 移動が無ければ g_nextStepUs を現在時刻へ戻し、古い予約時刻を捨てる。
   if (g_currentAxis == 0) {
-    if (!startNextMotionBatch(now)) return;
+    if (!startNextMotionBatch(now)) {
+      g_nextStepUs = now;
+      return;
+    }
+  } else {
+    if (!timePassed(now, g_nextStepUs)) return;
   }
 
   if (g_currentAxis == 1) {
@@ -472,9 +486,9 @@ static bool hidDescLooksLikeMouse(uint8_t const* desc, uint16_t len) {
   if (!desc || len < 4) return false;
 
   bool genericDesktop = hidDescContainsBytePair(desc, len, 0x05, 0x01);
-  bool usageMouse = hidDescContainsBytePair(desc, len, 0x09, 0x02);
-  bool usageX = hidDescContainsBytePair(desc, len, 0x09, 0x30);
-  bool usageY = hidDescContainsBytePair(desc, len, 0x09, 0x31);
+  bool usageMouse     = hidDescContainsBytePair(desc, len, 0x09, 0x02);
+  bool usageX         = hidDescContainsBytePair(desc, len, 0x09, 0x30);
+  bool usageY         = hidDescContainsBytePair(desc, len, 0x09, 0x31);
 
   return genericDesktop && usageMouse && usageX && usageY;
 }
@@ -548,7 +562,7 @@ static bool parseMouseReport(uint8_t dev_addr, uint8_t instance,
 }
 
 extern "C" void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
-                                 uint8_t const* desc_report, uint16_t desc_len) {
+                                  uint8_t const* desc_report, uint16_t desc_len) {
   bool isMouse = false;
   bool hasReportId = hidDescHasReportId(desc_report, desc_len);
 
@@ -612,7 +626,7 @@ extern "C" void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
 }
 
 extern "C" void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
-                                           uint8_t const* report, uint16_t len) {
+                                            uint8_t const* report, uint16_t len) {
   bool accept = false;
 
   if (dev_addr < MAX_USB_ADDR && instance < MAX_HID_INST) {
