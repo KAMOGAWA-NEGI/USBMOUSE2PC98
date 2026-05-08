@@ -50,7 +50,6 @@ RP2040 GND / HCT07 GND / PC-98 GND 共通
 | XB | GPIO15 |
 | YA | GPIO26 |
 
-GPIO27 / GPIO28 / GPIO29 は現在未使用です。
 
 ## 信号論理
 
