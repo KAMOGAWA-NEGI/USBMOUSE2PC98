@@ -75,6 +75,24 @@ XA / XB、YA / YB は2相信号です。
 逆方向 : 00 -> 01 -> 11 -> 10 -> 00
 ```
 
+## マウス移動量調整
+
+トラックボールや高DPIマウスでは移動量が大きすぎる場合があります。  
+以下の値で調整できます。
+
+```cpp
+static constexpr bool INVERT_X = false;
+static constexpr bool INVERT_Y = false;
+static constexpr int32_t MOTION_SCALE_NUM = 1;
+static constexpr int32_t MOTION_SCALE_DEN = 4;
+```
+
+例:
+
+- 移動が速すぎる場合: `MOTION_SCALE_DEN` を大きくする
+- 向きが逆の場合: `INVERT_X` / `INVERT_Y` を `true`
+
+
 ## Arduino IDE設定
 
 Earle Philhower版RP2040コアを使用してください。
